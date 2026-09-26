@@ -1,14 +1,16 @@
 # Hackathon submission — Build an Aqua App
 
-> **Seawall is a fully collateralized ETH put market where LP collateral is made available
+> **Seawall, a fully collateralized ETH downside-protection protocol
 > through 1inch Aqua and custom SwapVM instructions enforce the complete option lifecycle, from
 > purchase through settlement.**
 
+On Seawall, an LP makes USDC available through Aqua to back that insurance. The buyer purchases an ETH put, pays a premium, and the protocol reserves the maximum possible payout before the position becomes active.
+
 ## Track
 
-| **custom Aqua app** | Fully collateralized European ETH put: reserves `strike × quantity` (worst case), deterministic Black-Scholes quote, buyer-only exercise, keeperless settlement, LP collateral accounting | `contracts/core/`, `contracts/aqua/` |
+| **custom Aqua app** | Fully collateralized ETH put (exercise only at expiry): reserves `strike × quantity` (worst case), deterministic Black-Scholes quote, buyer-only exercise, keeperless settlement, LP collateral accounting | `contracts/core/`, `contracts/aqua/` |
 | **Modify SwapVM opcodes** | Five custom instructions appended to the official `AquaOpcodes` table (indices 34–38): `OPTION_OPEN`, `OPTION_BUY`, `OPTION_EXERCISE`, `OPTION_SETTLE`, `OPTION_EXPIRE`. Official opcode numbers preserved | `contracts/swapvm/`, `RouterProgramsTest.testCustomOpcodesAreAppended`, `testSwapVMInstruction` |
-| **Tests** | 94 Foundry tests + mainnet-fork test + end-to-end smoke script + React UI | `forge test`, `frontend/scripts/smoke.ts`, `frontend/` |
+| **Tests** | 99 Foundry tests + mainnet-fork test + end-to-end smoke script + React UI | `forge test`, `frontend/scripts/smoke.ts`, `frontend/` |
 | **Official Aqua/SwapVM contracts used** (redeploying a modified SwapVM is allowed) | Fork demo uses the **canonical deployed Aqua registry** `0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a`; the router extends the official `1inch/swap-vm` v1.0.2 (the version deployed on-chain) | `test/fork/MainnetFork.t.sol`, `script/DeployFork.s.sol` |
  
 ## Aqua-native
@@ -43,7 +45,7 @@
 ### 0. Contracts (30s)
 
 ```bash
-forge test          # 94 tests: pricing, lifecycle, integration, invariants, mainnet fork
+forge test          # 99 tests: pricing, lifecycle, integration, invariants, mainnet fork
 ```
 
 ### 1. Deploy against the canonical Aqua registry on a mainnet fork (1 min)
@@ -54,9 +56,9 @@ MAINNET_RPC_URL=<your rpc> ./script/demo-fork.sh
 
 What it does:
 1. starts `anvil --fork-url $MAINNET_RPC_URL --auto-impersonate --chain-id 31337 --port 8546`
-2. sends **real mainnet USDC** from a whale to Bob (200,000) and Alice (10,000)
+2. sends **real mainnet USDC** from a whale to the demo LP (200,000) and buyer (10,000)
 3. deploys the stack against the **canonical Aqua** `0x1111113C…` with real USDC/WETH
-4. ships Bob's four Aqua strategies, registers the pool, writes `deployments/31337.json`
+4. ships the LP's four Aqua strategies, registers the pool, writes `deployments/31337.json`
 
 ### 2. UI lifecycle (2 min)
 
@@ -69,14 +71,21 @@ cd frontend && pnpm install && pnpm dev
    premium ≈ `132.9 USDC` (model quote), payout table shown.
    Click **BUY PUT** → position `#1 ACTIVE`.
 3. **LP tab** — reserved `10,000`, premium earned `≈133`, available `≈90,133`.
-4. **Position tab** — Alice's position loads from `OptionPurchased` events. Set spot `2000`,
+4. **Position tab** — the buyer's position loads from `OptionPurchased` events. Set spot `2000`,
    `SET SETTLEMENT 2000`, `ADVANCE TO EXPIRY`, then **EXERCISE** →
-   payout `2,000 USDC` pulled from Bob's Aqua balance to Alice; status `SETTLED`;
+   payout `2,000 USDC` pulled from the LP's Aqua balance to the buyer; status `SETTLED`;
    LP realized PnL `≈ −1,867`.
 5. **OTM path** — buy another put, keep the price above the strike, `EXPIRE` →
-   reservation released, Bob keeps the premium.
+   reservation released, the LP keeps the premium.
 
-### 3. Optional evidence (1 min)
+### 3. Terminal-only demo (if you prefer no browser)
+
+```bash
+./script/demo-terminal.sh
+# one command: anvil + deploy + narrated lifecycle with real USDC movements
+```
+
+### 4. Optional evidence (1 min)
 
 ```bash
 # real Chainlink ETH/USD + real USDC, with assertions
@@ -91,8 +100,8 @@ cd frontend && node --experimental-strip-types scripts/smoke.ts
 ## Architecture in one diagram
 
 ```
-Alice ── buy / exercise ──► SeawallRouter (official SwapVM + 5 custom opcodes)
-Bob  ── ship / push ──────►        │                    │
+Buyer ── buy / exercise ──► SeawallRouter (official SwapVM + 5 custom opcodes)
+LP    ── ship / push ─────►        │                    │
                                    ▼                    ▼
                              OptionManager          Aqua registry
                         lifecycle + accounting   ship / push / pull

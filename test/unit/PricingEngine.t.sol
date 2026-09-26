@@ -114,6 +114,22 @@ contract PricingEngineTest is Test {
         assertGt(premium, 0);
     }
 
+    function test_quotePremiumTwoHourAtm() public view {
+        // Short-tenor ATM puts amplify the CDF error via cancellation; tolerance is 1 cent.
+        uint256 premium = engine.quotePremium(3000e18, 3000e18, 4e18, block.timestamp + 2 hours, 0.6e18, 0.05e18);
+        assertApproxEqAbs(premium, 43.332722e18, 1e16, "2h atm put");
+    }
+
+    function test_quotePremiumOneDayAtm() public view {
+        uint256 premium = engine.quotePremium(3000e18, 3000e18, 4e18, block.timestamp + 1 days, 0.6e18, 0.05e18);
+        assertApproxEqAbs(premium, 149.510565e18, 1e16, "24h atm put");
+    }
+
+    function test_quotePremiumTwoDayAtm() public view {
+        uint256 premium = engine.quotePremium(3000e18, 3000e18, 4e18, block.timestamp + 2 days, 0.6e18, 0.05e18);
+        assertApproxEqAbs(premium, 210.937273e18, 1e16, "48h atm put");
+    }
+
     function test_quotePremiumRevertsExpiryInPast() public {
         vm.expectRevert(
             abi.encodeWithSelector(PricingEngine.PricingExpiryNotInFuture.selector, block.timestamp, block.timestamp)

@@ -30,5 +30,8 @@ frontend:
 smoke:
 	cd frontend && node --experimental-strip-types scripts/smoke.ts
 
+demo-terminal:
+	./script/demo-terminal.sh
+
 clean:
 	forge clean && rm -rf frontend/dist

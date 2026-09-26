@@ -42,7 +42,9 @@ cast send --unlocked --from "${WHALE}" "${USDC}" "transfer(address,uint256)" "${
 echo "==> deploying against canonical Aqua 0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a"
 forge script script/DeployFork.s.sol --rpc-url "${FORK_RPC}" --broadcast < /dev/null
 
+echo "==> running the lifecycle demo against real mainnet USDC"
+(cd frontend && node --experimental-strip-types scripts/smoke.ts)
+
 echo
-echo "==> done. anvil is still running on ${FORK_RPC}"
-echo "    start the UI:  cd frontend && pnpm install && pnpm dev"
-echo "    stop anvil:    pkill -f 'anvil --port 8546'"
+echo "==> done. anvil is still running on ${FORK_RPC} (optional UI: cd frontend && pnpm dev)"
+echo "    stop anvil: pkill -f 'anvil --port 8546'"

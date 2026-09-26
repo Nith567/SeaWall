@@ -486,6 +486,37 @@ contract OptionManagerTest is Test {
         router.open(poolId, lp, alice, STRIKE, QUANTITY, block.timestamp + 91 days);
     }
 
+    function testShortTenorLifecycleTwoHours() public {
+        uint256 shortExpiry = block.timestamp + 2 hours;
+        uint256 notional = router.open(poolId, lp, alice, 3000e6, 4e18, shortExpiry);
+        assertEq(notional, 12_000e6);
+
+        uint256 premium = manager.getPending(poolId).premium;
+        assertGt(premium, 0, "2h ATM premium is positive");
+        uint256 positionId = router.buy(poolId, alice, premium);
+
+        oracle.setSettlementPrice(shortExpiry, 2500e18);
+        vm.warp(shortExpiry + 1);
+
+        router.exercise(positionId, alice);
+        (,, uint256 payout) = router.settle(positionId);
+        assertEq(payout, 2000e6, "intrinsic * quantity");
+        assertEq(uint8(manager.getPosition(positionId).status), uint8(OptionStatus.SETTLED));
+    }
+
+    function testShortTenorLifecycleTwoDays() public {
+        uint256 shortExpiry = block.timestamp + 2 days;
+        router.open(poolId, lp, alice, 2500e6, 4e18, shortExpiry);
+        uint256 premium = manager.getPending(poolId).premium;
+        uint256 positionId = router.buy(poolId, alice, premium);
+
+        oracle.setSettlementPrice(shortExpiry, 2000e18);
+        vm.warp(shortExpiry + 1);
+
+        (,, uint256 payout) = router.settle(positionId);
+        assertEq(payout, 2000e6);
+    }
+
     // ---------------------------------------------------------------------
     // Collateral accounting
     // ---------------------------------------------------------------------

@@ -18,7 +18,6 @@ import { RouterDeployer } from "./RouterDeployer.sol";
 /// @notice Deploys the full Seawall stack on a local anvil chain, funds the demo actors and
 ///         sets up Bob's LP pool. Writes `deployments/31337.json` for the frontend.
 ///
-/// Usage:
 ///   anvil --port 8546
 ///   forge script script/DeployLocal.s.sol --rpc-url http://127.0.0.1:8546 --broadcast
 contract DeployLocal is Script {
