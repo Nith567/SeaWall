@@ -1,0 +1,29 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`StringUtil Gas usage Empty bytes 1`] = `22188n`;
+
+exports[`StringUtil Gas usage Empty bytes naive 1`] = `22498n`;
+
+exports[`StringUtil Gas usage Extremely long byte array gas 1`] = `55723n`;
+
+exports[`StringUtil Gas usage Extremely long byte array gas naive 1`] = `514608n`;
+
+exports[`StringUtil Gas usage Single byte 1`] = `22865n`;
+
+exports[`StringUtil Gas usage Single byte naive 1`] = `23131n`;
+
+exports[`StringUtil Gas usage Uint 128 1`] = `22568n`;
+
+exports[`StringUtil Gas usage Uint 128 naive 1`] = `37475n`;
+
+exports[`StringUtil Gas usage Uint 256 1`] = `22760n`;
+
+exports[`StringUtil Gas usage Uint 256 as bytes 1`] = `23255n`;
+
+exports[`StringUtil Gas usage Uint 256 as bytes naive 1`] = `38252n`;
+
+exports[`StringUtil Gas usage Uint 256 naive 1`] = `37667n`;
+
+exports[`StringUtil Gas usage Very long byte array gas 1`] = `24999n`;
+
+exports[`StringUtil Gas usage Very long byte array gas naive 1`] = `55589n`;
