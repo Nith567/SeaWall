@@ -1,0 +1,10 @@
+out/
+cache/
+node_modules/
+.research/
+.env
+broadcast/
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+CLAUDE.md
