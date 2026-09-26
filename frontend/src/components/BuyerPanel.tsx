@@ -2,13 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 
 import { addresses, WAD } from "../config";
-import { buyOption, quotePremium } from "../actions";
+import { buyOption, quotePremium, type Signer } from "../actions";
 import type { GlobalState } from "../hooks";
 
-export function BuyerPanel({ state, onDone }: { state: GlobalState; onDone: () => void }) {
+export function BuyerPanel({
+  state,
+  signer,
+  onDone,
+}: {
+  state: GlobalState;
+  signer: Signer;
+  onDone: () => void;
+}) {
   const [strikeInput, setStrikeInput] = useState("2500");
   const [notionalInput, setNotionalInput] = useState("10000");
-  const [tenorDays, setTenorDays] = useState("30");
+  const [tenorValue, setTenorValue] = useState("30");
+  const [tenorUnit, setTenorUnit] = useState<"minutes" | "hours" | "days">("days");
   const [premium, setPremium] = useState<bigint | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -30,15 +39,16 @@ export function BuyerPanel({ state, onDone }: { state: GlobalState; onDone: () =
   }, [notionalInput]);
 
   const quantity = strike > 0n ? (notional * WAD) / strike : 0n;
+  const tenorSeconds = tenorUnit === "minutes" ? 60 : tenorUnit === "hours" ? 3600 : 86400;
   const expiry = useMemo(
     // Use the chain clock: the demo can time-travel, wall clock cannot.
-    () => state.blockTimestamp + BigInt(Math.floor(Number(tenorDays || "0") * 86400)),
-    [tenorDays, state.blockTimestamp],
+    () => state.blockTimestamp + BigInt(Math.floor(Number(tenorValue || "0") * tenorSeconds)),
+    [tenorValue, tenorSeconds, state.blockTimestamp],
   );
 
   useEffect(() => {
     let alive = true;
-    if (strike === 0n || quantity === 0n || !tenorDays) {
+    if (strike === 0n || quantity === 0n || !tenorValue) {
       setPremium(null);
       return;
     }
@@ -52,7 +62,7 @@ export function BuyerPanel({ state, onDone }: { state: GlobalState; onDone: () =
     return () => {
       alive = false;
     };
-  }, [strike, quantity, expiry, tenorDays]);
+  }, [strike, quantity, expiry, tenorValue]);
 
   // A few "what if" scenarios at expiry.
   const preview = useMemo(() => {
@@ -75,7 +85,7 @@ export function BuyerPanel({ state, onDone }: { state: GlobalState; onDone: () =
     setBusy(true);
     setMessage(null);
     try {
-      const result = await buyOption("alice", addresses.lp, strike, quantity, expiry);
+      const result = await buyOption(signer, addresses.lp, strike, quantity, expiry);
       setMessage(`Bought ETH PUT for ${formatUnits(result.premium, 6)} USDC`);
       onDone();
     } catch (e) {
@@ -93,6 +103,28 @@ export function BuyerPanel({ state, onDone }: { state: GlobalState; onDone: () =
         on-chain); strike is USDC per 1 ETH.
       </p>
 
+      <div className="quick">
+        {[
+          { label: "1h", value: "1", unit: "hours" as const },
+          { label: "6h", value: "6", unit: "hours" as const },
+          { label: "1d", value: "1", unit: "days" as const },
+          { label: "7d", value: "7", unit: "days" as const },
+          { label: "30d", value: "30", unit: "days" as const },
+        ].map((preset) => (
+          <button
+            key={preset.label}
+            type="button"
+            className={`chip ${tenorValue === preset.value && tenorUnit === preset.unit ? "active" : ""}`}
+            onClick={() => {
+              setTenorValue(preset.value);
+              setTenorUnit(preset.unit);
+            }}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid">
         <label>
           ETH spot (oracle)
@@ -103,8 +135,15 @@ export function BuyerPanel({ state, onDone }: { state: GlobalState; onDone: () =
           <input value={strikeInput} onChange={(e) => setStrikeInput(e.target.value)} />
         </label>
         <label>
-          Expiry (days)
-          <input value={tenorDays} onChange={(e) => setTenorDays(e.target.value)} />
+          Expiry
+          <span className="inline-input">
+            <input value={tenorValue} onChange={(e) => setTenorValue(e.target.value)} />
+            <select value={tenorUnit} onChange={(e) => setTenorUnit(e.target.value as typeof tenorUnit)}>
+              <option value="minutes">minutes</option>
+              <option value="hours">hours</option>
+              <option value="days">days</option>
+            </select>
+          </span>
         </label>
         <label>
           Notional ($, e.g. 10000)

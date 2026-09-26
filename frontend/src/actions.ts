@@ -1,8 +1,8 @@
-import type { Address } from "viem";
+import type { Address, WalletClient } from "viem";
 
 import {
   addresses,
-  aliceWallet,
+  anvil,
   aquaAbi,
   bobWallet,
   erc20Abi,
@@ -20,12 +20,8 @@ import {
   type Order,
 } from "./encoding";
 
-export type Actor = "bob" | "alice";
-
-export const actorAddress = (actor: Actor): Address =>
-  actor === "bob" ? addresses.lp : addresses.alice;
-
-const walletFor = (actor: Actor) => (actor === "bob" ? bobWallet : aliceWallet);
+/// A signer is either a connected browser wallet (MetaMask) or one of the local demo keys.
+export type Signer = { address: Address; wallet: WalletClient };
 
 const PROGRAM_FN = {
   buy: "buildBuyProgram",
@@ -52,21 +48,21 @@ export async function buildOrder(maker: Address, kind: ProgramKind): Promise<Ord
 }
 
 export async function approveIfNeeded(
-  actor: Actor,
+  signer: Signer,
   token: Address,
   spender: Address,
   minimum: bigint,
 ): Promise<void> {
-  const owner = actorAddress(actor);
   const allowance = await publicClient.readContract({
     address: token,
     abi: erc20Abi,
     functionName: "allowance",
-    args: [owner, spender],
+    args: [signer.address, spender],
   });
   if (allowance >= minimum) return;
-  const wallet = walletFor(actor);
-  const hash = await wallet.writeContract({
+  const hash = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: token,
     abi: erc20Abi,
     functionName: "approve",
@@ -85,7 +81,7 @@ export async function quotePremium(strike: bigint, quantity: bigint, expiry: big
 }
 
 export async function buyOption(
-  actor: Actor,
+  signer: Signer,
   maker: Address,
   strike: bigint,
   quantity: bigint,
@@ -93,15 +89,16 @@ export async function buyOption(
 ): Promise<{ tx: `0x${string}`; premium: bigint }> {
   const order = await buildOrder(maker, "buy");
   const premium = await quotePremium(strike, quantity, expiry);
-  await approveIfNeeded(actor, addresses.usdc, addresses.router, premium);
+  await approveIfNeeded(signer, addresses.usdc, addresses.router, premium);
 
   const takerData = buildTakerData({
     useTransferFromAndAquaPush: true,
     instructionsArgs: encodeOpenArgs(strike, quantity, expiry),
   });
 
-  const wallet = walletFor(actor);
-  const tx = await wallet.writeContract({
+  const tx = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: addresses.router,
     abi: routerAbi,
     functionName: "swap",
@@ -112,7 +109,7 @@ export async function buyOption(
 }
 
 export async function exercisePosition(
-  actor: Actor,
+  signer: Signer,
   maker: Address,
   positionId: bigint,
 ): Promise<`0x${string}`> {
@@ -121,8 +118,9 @@ export async function exercisePosition(
     useTransferFromAndAquaPush: false,
     instructionsArgs: encodePositionIdTwice(positionId),
   });
-  const wallet = walletFor(actor);
-  const tx = await wallet.writeContract({
+  const tx = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: addresses.router,
     abi: routerAbi,
     functionName: "swap",
@@ -132,14 +130,15 @@ export async function exercisePosition(
   return tx;
 }
 
-export async function settlePosition(actor: Actor, maker: Address, positionId: bigint): Promise<`0x${string}`> {
+export async function settlePosition(signer: Signer, maker: Address, positionId: bigint): Promise<`0x${string}`> {
   const order = await buildOrder(maker, "settle");
   const takerData = buildTakerData({
     useTransferFromAndAquaPush: false,
     instructionsArgs: encodePositionId(positionId),
   });
-  const wallet = walletFor(actor);
-  const tx = await wallet.writeContract({
+  const tx = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: addresses.router,
     abi: routerAbi,
     functionName: "swap",
@@ -149,14 +148,15 @@ export async function settlePosition(actor: Actor, maker: Address, positionId: b
   return tx;
 }
 
-export async function expirePosition(actor: Actor, maker: Address, positionId: bigint): Promise<`0x${string}`> {
+export async function expirePosition(signer: Signer, maker: Address, positionId: bigint): Promise<`0x${string}`> {
   const order = await buildOrder(maker, "expire");
   const takerData = buildTakerData({
     useTransferFromAndAquaPush: false,
     instructionsArgs: encodePositionId(positionId),
   });
-  const wallet = walletFor(actor);
-  const tx = await wallet.writeContract({
+  const tx = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: addresses.router,
     abi: routerAbi,
     functionName: "swap",
@@ -166,17 +166,25 @@ export async function expirePosition(actor: Actor, maker: Address, positionId: b
   return tx;
 }
 
+// ---------------------------------------------------------------------------
+// LP actions always sign with Bob's local demo key (the pool maker).
+// ---------------------------------------------------------------------------
+
 export async function depositCollateral(amount: bigint): Promise<`0x${string}`> {
-  await approveIfNeeded("bob", addresses.usdc, addresses.aqua, amount);
-  const wallet = walletFor("bob");
-  const tx = await wallet.writeContract({
+  const signer: Signer = { address: addresses.lp, wallet: bobWallet };
+  await approveIfNeeded(signer, addresses.usdc, addresses.aqua, amount);
+  const tx = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: addresses.aqua,
     abi: aquaAbi,
     functionName: "push",
     args: [addresses.lp, addresses.router, addresses.poolId, addresses.usdc, amount],
   });
   await publicClient.waitForTransactionReceipt({ hash: tx });
-  const sync = await wallet.writeContract({
+  const sync = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: addresses.optionManager,
     abi: managerAbi,
     functionName: "syncPool",
@@ -187,8 +195,9 @@ export async function depositCollateral(amount: bigint): Promise<`0x${string}`> 
 }
 
 export async function withdrawCollateral(amount: bigint): Promise<`0x${string}`> {
-  const wallet = walletFor("bob");
-  const tx = await wallet.writeContract({
+  const tx = await bobWallet.writeContract({
+    chain: anvil,
+    account: addresses.lp,
     address: addresses.router,
     abi: routerAbi,
     functionName: "withdrawCollateral",
@@ -198,9 +207,10 @@ export async function withdrawCollateral(amount: bigint): Promise<`0x${string}`>
   return tx;
 }
 
-export async function setDemoSpot(price: bigint): Promise<void> {
-  const wallet = walletFor("bob");
-  const hash = await wallet.writeContract({
+export async function setDemoSpot(signer: Signer, price: bigint): Promise<void> {
+  const hash = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: addresses.oracle,
     abi: oracleAbi,
     functionName: "setSpot",
@@ -209,9 +219,10 @@ export async function setDemoSpot(price: bigint): Promise<void> {
   await publicClient.waitForTransactionReceipt({ hash });
 }
 
-export async function setDemoSettlement(expiry: bigint, price: bigint): Promise<void> {
-  const wallet = walletFor("bob");
-  const hash = await wallet.writeContract({
+export async function setDemoSettlement(signer: Signer, expiry: bigint, price: bigint): Promise<void> {
+  const hash = await signer.wallet.writeContract({
+    chain: anvil,
+    account: signer.address,
     address: addresses.oracle,
     abi: oracleAbi,
     functionName: "setSettlementPrice",

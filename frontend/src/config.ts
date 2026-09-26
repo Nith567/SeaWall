@@ -1,4 +1,12 @@
-import { createPublicClient, createWalletClient, defineChain, http, parseAbi, type Address } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  custom,
+  defineChain,
+  http,
+  parseAbi,
+  type Address,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import deployment from "../../deployments/31337.json";
@@ -23,6 +31,22 @@ export const alice = { name: "Alice (Buyer)", account: privateKeyToAccount(ALICE
 
 export const bobWallet = createWalletClient({ account: bob.account, chain: anvil, transport: http(RPC_URL) });
 export const aliceWallet = createWalletClient({ account: alice.account, chain: anvil, transport: http(RPC_URL) });
+
+/// Injected wallet (MetaMask) support. The demo still works without it using the anvil keys.
+export function hasInjectedWallet(): boolean {
+  return typeof window !== "undefined" && Boolean((window as { ethereum?: unknown }).ethereum);
+}
+
+export function injectedWallet(address: Address) {
+  const ethereum = (window as unknown as { ethereum: unknown }).ethereum;
+  return createWalletClient({
+    account: address,
+    chain: anvil,
+    transport: custom(ethereum as never),
+  });
+}
+
+export const ANVIL_CHAIN_ID_HEX = `0x${anvil.id.toString(16)}`;
 
 export const addresses = {
   aqua: deployment.aqua as Address,

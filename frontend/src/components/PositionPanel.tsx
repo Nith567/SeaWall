@@ -2,13 +2,28 @@ import { useEffect, useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 
 import { addresses, OPTION_STATUS } from "../config";
-import { exercisePosition, expirePosition, setDemoSettlement, setDemoSpot, settlePosition } from "../actions";
+import {
+  exercisePosition,
+  expirePosition,
+  setDemoSettlement,
+  setDemoSpot,
+  settlePosition,
+  type Signer,
+} from "../actions";
 import { increaseTime } from "../anvil";
 import { loadPosition, useBuyerPositions, type GlobalState, type Position } from "../hooks";
 
-export function PositionPanel({ state, onDone }: { state: GlobalState; onDone: () => void }) {
+export function PositionPanel({
+  state,
+  signer,
+  onDone,
+}: {
+  state: GlobalState;
+  signer: Signer;
+  onDone: () => void;
+}) {
   const { data: alicePositions, refresh: refreshPositions } = useBuyerPositions(
-    addresses.alice,
+    signer.address,
     state.nextPositionId,
   );
 
@@ -87,8 +102,9 @@ export function PositionPanel({ state, onDone }: { state: GlobalState; onDone: (
     <section className="card">
       <h2>Positions</h2>
       <p className="muted">
-        Alice's positions are loaded from the manager's <code>OptionPurchased</code> events. Anyone
-        may settle; only the buyer can exercise.
+        Positions for <span className="mono">{signer.address.slice(0, 6)}…{signer.address.slice(-4)}</span>{" "}
+        are loaded from the manager's <code>OptionPurchased</code> events. Anyone may settle; only the
+        buyer can exercise.
       </p>
 
       {alicePositions && alicePositions.length > 0 && (
@@ -159,19 +175,19 @@ export function PositionPanel({ state, onDone }: { state: GlobalState; onDone: (
           <div className="row">
             <button
               disabled={busy || !maker || !expired || windowClosed}
-              onClick={() => run(() => exercisePosition("alice", maker!, position.id), "Exercise")}
+              onClick={() => run(() => exercisePosition(signer, maker!, position.id), "Exercise")}
             >
               EXERCISE
             </button>
             <button
               disabled={busy || !maker || !expired}
-              onClick={() => run(() => settlePosition("bob", maker!, position.id), "Settle")}
+              onClick={() => run(() => settlePosition(signer, maker!, position.id), "Settle")}
             >
               SETTLE (keeperless)
             </button>
             <button
               disabled={busy || !maker || !expired}
-              onClick={() => run(() => expirePosition("bob", maker!, position.id), "Expire")}
+              onClick={() => run(() => expirePosition(signer, maker!, position.id), "Expire")}
             >
               EXPIRE
             </button>
@@ -187,7 +203,7 @@ export function PositionPanel({ state, onDone }: { state: GlobalState; onDone: (
           </p>
           <div className="row">
             <input value={spotInput} onChange={(e) => setSpotInput(e.target.value)} />
-            <button disabled={busy} onClick={() => run(() => setDemoSpot(parseUnits(spotInput || "0", 18)), "Set spot")}>
+            <button disabled={busy} onClick={() => run(() => setDemoSpot(signer, parseUnits(spotInput || "0", 18)), "Set spot")}>
               SET SPOT
             </button>
             <input value={settlementInput} onChange={(e) => setSettlementInput(e.target.value)} />
@@ -195,7 +211,7 @@ export function PositionPanel({ state, onDone }: { state: GlobalState; onDone: (
               disabled={busy}
               onClick={() =>
                 run(
-                  () => setDemoSettlement(position.expiry, parseUnits(settlementInput || "0", 18)),
+                  () => setDemoSettlement(signer, position.expiry, parseUnits(settlementInput || "0", 18)),
                   "Set settlement price",
                 )
               }

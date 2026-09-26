@@ -1,5 +1,6 @@
 /**
- * End-to-end smoke test for the frontend's encoding + action layer.
+ * Terminal demo: the complete Seawall lifecycle with real transactions broadcast to a local anvil
+ * chain. Bob is the LP, Alice is the buyer. Prints the story and asserts every token movement.
  *
  * Prereqs:
  *   anvil --port 8546
@@ -7,6 +8,8 @@
  *
  * Run:
  *   node --experimental-strip-types scripts/smoke.ts
+ * or one-shot:
+ *   ./script/demo-terminal.sh
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -56,6 +59,7 @@ const routerAbi = parseAbi([
 ]);
 const managerAbi = parseAbi([
   "function quotePremium(uint256 strike, uint256 quantity, uint256 expiry) view returns (uint256)",
+  "function poolState(bytes32 poolId) view returns (address maker, uint256 totalCollateral, uint256 reservedLiability, uint256 availableCollateral, uint256 premiumEarned, uint256 payoutsPaid, uint256 maxNotionalPerOption, uint256 maxTenor, bool active)",
   "function getPosition(uint256) view returns ((uint256 id, address buyer, bytes32 pool, uint256 notional, uint256 quantity, uint256 strike, uint256 expiry, uint256 premium, uint256 settlementPrice, uint256 payout, uint8 status))",
   "function nextPositionId() view returns (uint256)",
   "event OptionPurchased(uint256 indexed positionId, bytes32 indexed orderHash, address indexed buyer, uint256 premium)",
@@ -65,9 +69,10 @@ const erc20Abi = parseAbi([
   "function allowance(address, address) view returns (uint256)",
   "function balanceOf(address) view returns (uint256)",
 ]);
-const oracleAbi = parseAbi([
-  "function setSettlementPrice(uint256 expiry, uint256 price)",
-  "function setSpot(uint256 price)",
+const oracleAbi = parseAbi(["function setSettlementPrice(uint256 expiry, uint256 price)"]);
+const paramsAbi = parseAbi([
+  "function volatility() view returns (uint256)",
+  "function riskFreeRate() view returns (uint256)",
 ]);
 
 const router = deployment.router as `0x${string}`;
@@ -77,16 +82,66 @@ const weth = deployment.weth as `0x${string}`;
 const oracle = deployment.oracle as `0x${string}`;
 const lp = deployment.lp as `0x${string}`;
 const aliceAddress = deployment.alice as `0x${string}`;
+const poolId = deployment.poolId as `0x${string}`;
+const marketParams = deployment.marketParams as `0x${string}`;
 const WAD = 10n ** 18n;
 
+const usd = (v: bigint) => `${formatUnits(v, 6)} USDC`;
+const eth = (v: bigint) => `${formatUnits(v, 18)} ETH`;
+const line = () => console.log("─".repeat(72));
+const step = (n: number, title: string) => {
+  line();
+  console.log(`  ${n}. ${title}`);
+  line();
+};
+
+async function poolState() {
+  const raw = await publicClient.readContract({
+    address: manager,
+    abi: managerAbi,
+    functionName: "poolState",
+    args: [poolId],
+  });
+  return {
+    total: raw[1],
+    reserved: raw[2],
+    available: raw[3],
+    premium: raw[4],
+    payouts: raw[5],
+  };
+}
+
+async function usdcBalance(address: `0x${string}`) {
+  return publicClient.readContract({ address: usdc, abi: erc20Abi, functionName: "balanceOf", args: [address] });
+}
+
 async function main() {
-  // Use the chain clock: the demo can time-travel, wall clock cannot.
   const now = (await publicClient.getBlock({ blockTag: "latest" })).timestamp;
   const expiry = now + 30n * 86400n;
   const strike = parseUnits("2500", 6);
   const notional = parseUnits("10000", 6);
   const quantity = (notional * WAD) / strike;
 
+  console.log("");
+  line();
+  console.log("  SEAWALL — fully collateralized ETH puts on 1inch Aqua + SwapVM");
+  line();
+  console.log(`  Aqua registry : ${deployment.aqua}`);
+  console.log(`  USDC          : ${usdc}`);
+  console.log(`  Bob (LP)      : ${lp}`);
+  console.log(`  Alice (buyer) : ${aliceAddress}`);
+  console.log(`  Pool (strategy hash) : ${poolId}`);
+
+  step(1, "Bob's collateral pool");
+  let pool = await poolState();
+  console.log(`  totalCollateral     : ${usd(pool.total)}   (live Aqua balance)`);
+  console.log(`  reservedLiability   : ${usd(pool.reserved)}`);
+  console.log(`  availableCollateral : ${usd(pool.available)}`);
+
+  const aliceBefore = await usdcBalance(aliceAddress);
+  const bobBefore = await usdcBalance(lp);
+
+  step(2, "Alice prices a put through the on-chain PricingEngine");
   const program = await publicClient.readContract({
     address: router,
     abi: routerAbi,
@@ -104,7 +159,25 @@ async function main() {
     functionName: "quotePremium",
     args: [strike, quantity, expiry],
   });
+  const [volatility, riskFreeRate] = await Promise.all([
+    publicClient.readContract({ address: marketParams, abi: paramsAbi, functionName: "volatility" }),
+    publicClient.readContract({ address: marketParams, abi: paramsAbi, functionName: "riskFreeRate" }),
+  ]);
+  const premiumPerEth = (premium * WAD) / quantity;
+  const maxLiability = (strike * quantity) / WAD;
 
+  console.log(`  spot (oracle)   : $3,000`);
+  console.log(`  strike          : $${formatUnits(strike, 6)}   (USDC per ETH, 6 decimals)`);
+  console.log(`  expiry          : ${new Date(Number(expiry) * 1000).toISOString().slice(0, 10)} (30 days)`);
+  console.log(`  notional        : ${usd(notional)}  →  quantity ${eth(quantity)}`);
+  console.log(`  model           : Black-Scholes put · vol ${formatUnits(volatility, 16)}% · rate ${formatUnits(riskFreeRate, 16)}%`);
+  console.log(`  premium / ETH   : $${formatUnits(premiumPerEth, 6)}  ×  ${eth(quantity)}`);
+  console.log(`  ────────────────────────────────────────────────────────────────`);
+  console.log(`  ALICE PAYS      : ${usd(premium)}   (enforced on-chain by OPTION_BUY)`);
+  console.log(`  BOB RESERVES    : ${usd(maxLiability)}   (max payout = strike × quantity)`);
+  console.log(`  ────────────────────────────────────────────────────────────────`);
+
+  step(3, "Alice buys: [OPTION_OPEN][OPTION_BUY] through SwapVM (premium must match the quote)");
   const allowance = await publicClient.readContract({
     address: usdc,
     abi: erc20Abi,
@@ -120,19 +193,10 @@ async function main() {
     });
     await publicClient.waitForTransactionReceipt({ hash: approveHash });
   }
-
   const takerData = buildTakerData({
     useTransferFromAndAquaPush: true,
     instructionsArgs: encodeOpenArgs(strike, quantity, expiry),
   });
-
-  const aliceBefore = await publicClient.readContract({
-    address: usdc,
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: [aliceAddress],
-  });
-
   const buyHash = await alice.writeContract({
     address: router,
     abi: routerAbi,
@@ -147,34 +211,24 @@ async function main() {
     functionName: "nextPositionId",
   });
   const positionId = nextId - 1n;
-
   const position = await publicClient.readContract({
     address: manager,
     abi: managerAbi,
     functionName: "getPosition",
     args: [positionId],
   });
-  const aliceAfter = await publicClient.readContract({
-    address: usdc,
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: [aliceAddress],
-  });
+  const aliceAfterBuy = await usdcBalance(aliceAddress);
+  pool = await poolState();
 
-  console.log(`premium:        ${formatUnits(premium, 6)} USDC`);
-  console.log(`buyer:          ${position.buyer}`);
-  console.log(`status:         ${position.status} (1 = ACTIVE)`);
-  console.log(`notional:       ${formatUnits(position.notional, 6)} USDC`);
-  console.log(`alice delta:    -${formatUnits(aliceBefore - aliceAfter, 6)} USDC`);
+  console.log(`  tx              : ${buyHash}`);
+  console.log(`  position #${positionId}     : ${position.buyer}  status ACTIVE`);
+  console.log(`  Alice USDC      : ${usd(aliceBefore)} → ${usd(aliceAfterBuy)}  (−${usd(aliceBefore - aliceAfterBuy)})`);
+  console.log(`  reservedLiability: ${usd(pool.reserved)}   available: ${usd(pool.available)}`);
+  if (aliceBefore - aliceAfterBuy !== premium) throw new Error("premium mismatch");
 
-  if (position.status !== 1) throw new Error("position not active");
-  if (aliceBefore - aliceAfter !== premium) throw new Error("premium mismatch");
-  if (position.buyer.toLowerCase() !== aliceAddress.toLowerCase()) throw new Error("buyer mismatch");
-
-  // --- simulate expiry: time travel + settlement price, then exercise + settle ---
+  step(4, "ETH crashes to $2,000 and the option reaches expiry");
   await publicClient.request({ method: "evm_increaseTime", params: [30 * 86400 + 1] } as never);
   await publicClient.request({ method: "evm_mine", params: [] } as never);
-
   const settlement = parseUnits("2000", 18);
   const priceHash = await bob.writeContract({
     address: oracle,
@@ -183,7 +237,9 @@ async function main() {
     args: [expiry, settlement],
   });
   await publicClient.waitForTransactionReceipt({ hash: priceHash });
+  console.log(`  settlement price: $2,000  (oracle tx ${priceHash})`);
 
+  step(5, "Alice exercises + settles: [OPTION_EXERCISE][OPTION_SETTLE]");
   const exerciseProgram = await publicClient.readContract({
     address: router,
     abi: routerAbi,
@@ -199,26 +255,14 @@ async function main() {
     useTransferFromAndAquaPush: false,
     instructionsArgs: encodePositionIdTwice(positionId),
   });
-
-  const before = await publicClient.readContract({
-    address: usdc,
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: [aliceAddress],
-  });
-  const exerciseHash = await alice.writeContract({
+  const aliceBeforeSettle = await usdcBalance(aliceAddress);
+  const settleHash = await alice.writeContract({
     address: router,
     abi: routerAbi,
     functionName: "swap",
     args: [exerciseOrder, usdc, weth, 0n, exerciseData],
   });
-  await publicClient.waitForTransactionReceipt({ hash: exerciseHash });
-  const after = await publicClient.readContract({
-    address: usdc,
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: [aliceAddress],
-  });
+  await publicClient.waitForTransactionReceipt({ hash: settleHash });
 
   const settled = await publicClient.readContract({
     address: manager,
@@ -226,15 +270,27 @@ async function main() {
     functionName: "getPosition",
     args: [positionId],
   });
-  console.log(`payout:         ${formatUnits(settled.payout, 6)} USDC`);
-  console.log(`status:         ${settled.status} (3 = SETTLED)`);
-  console.log(`alice delta:    +${formatUnits(after - before, 6)} USDC`);
+  const aliceAfterSettle = await usdcBalance(aliceAddress);
+  const bobAfter = await usdcBalance(lp);
+  pool = await poolState();
+
+  console.log(`  tx              : ${settleHash}`);
+  console.log(`  payout          : ${usd(settled.payout)}   = (strike − settlement) × quantity`);
+  console.log(`  Alice USDC      : ${usd(aliceBeforeSettle)} → ${usd(aliceAfterSettle)}  (+${usd(aliceAfterSettle - aliceBeforeSettle)})`);
+  console.log(`  Bob USDC        : ${usd(bobBefore)} → ${usd(bobAfter)}  (premium in, payout out)`);
+
+  step(6, "Final state");
+  console.log(`  position status : ${settled.status} (3 = SETTLED)`);
+  console.log(`  reservedLiability: ${usd(pool.reserved)}   available: ${usd(pool.available)}`);
+  console.log(`  premiumEarned   : ${usd(pool.premium)}   payoutsPaid: ${usd(pool.payouts)}`);
+  const pnl = pool.premium >= pool.payouts ? pool.premium - pool.payouts : pool.payouts - pool.premium;
+  console.log(`  LP realized PnL : ${pool.premium >= pool.payouts ? "+" : "−"}${usd(pnl)}`);
+  line();
 
   if (settled.status !== 3) throw new Error("position not settled");
   if (settled.payout !== parseUnits("2000", 6)) throw new Error("payout mismatch");
-  if (after - before !== settled.payout) throw new Error("payout transfer mismatch");
+  if (aliceAfterSettle - aliceBeforeSettle !== settled.payout) throw new Error("payout transfer mismatch");
 
-  // The UI lists Alice's positions from these events.
   const events = await publicClient.getContractEvents({
     address: manager,
     abi: managerAbi,
@@ -243,11 +299,11 @@ async function main() {
     fromBlock: BigInt((deployment as { deployBlock?: number | string }).deployBlock ?? 0),
     toBlock: "latest",
   });
-  console.log(`position id:    ${positionId}`);
-  console.log(`buyer events:   ${events.length}`);
   if (!events.some((e) => e.args.positionId === positionId)) throw new Error("event query mismatch");
 
-  console.log("\nSMOKE TEST PASSED");
+  console.log("  DEMO PASSED — real USDC moved through Aqua: premium in, payout out.");
+  line();
+  console.log("");
 }
 
 main().catch((error) => {

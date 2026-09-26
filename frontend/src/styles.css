@@ -62,6 +62,29 @@ h3 {
   font-size: 12px;
 }
 
+.header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.wallet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-weight: 600;
+  padding: 7px 12px;
+}
+
 .header-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(140px, 1fr));
@@ -283,6 +306,47 @@ button:disabled {
 .preview td:last-child {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.quick {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+
+.chip {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chip.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(77, 163, 255, 0.12);
+}
+
+.inline-input {
+  display: flex;
+  gap: 6px;
+}
+
+.inline-input input {
+  width: 90px;
+}
+
+select {
+  background: #0d1428;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 8px;
+  font-size: 14px;
+  outline: none;
 }
 
 hr {
